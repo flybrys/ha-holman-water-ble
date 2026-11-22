@@ -17,6 +17,7 @@ from custom_components.holman_water_ble.parser import (
     build_watering_start,
     build_watering_stop,
     get_profile_characteristic_uuid,
+    parse_advertised_device_type,
     parse_device_info,
     parse_scan_record,
     parse_time_response,
@@ -92,6 +93,29 @@ class TestBuildWatering:
         assert result[3] == 10  # Manual minute
         # Bytes 4-9 should be zero
         assert all(b == 0 for b in result[4:])
+
+    @pytest.mark.parametrize(
+        ("duration", "hours", "minutes"),
+        [(1, 0, 1), (59, 0, 59), (60, 1, 0), (61, 1, 1), (90, 1, 30), (240, 4, 0)],
+    )
+    def test_build_watering_start_hours(self, duration, hours, minutes):
+        """Test that the minutes field never exceeds 59."""
+        result = build_watering_start(zone=1, duration_minutes=duration)
+
+        assert result[2] == hours
+        assert result[3] == minutes
+
+    @pytest.mark.parametrize("duration", [0, -1, 241])
+    def test_build_watering_start_out_of_range(self, duration):
+        """Test that an invalid duration is refused."""
+        with pytest.raises(ValueError):
+            build_watering_start(zone=1, duration_minutes=duration)
+
+    def test_advertised_device_type(self):
+        """Test reading the type from Home Assistant's manufacturer data."""
+        assert parse_advertised_device_type({0x0374: b"\x64\x03\x3d"}) == 100
+        assert parse_advertised_device_type({0x004C: b"\x64"}) is None
+        assert parse_advertised_device_type({}) is None
 
     def test_build_watering_start_zone_4(self):
         """Test building a watering start for zone 4."""

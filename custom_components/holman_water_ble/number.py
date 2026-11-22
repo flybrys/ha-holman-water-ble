@@ -1,30 +1,22 @@
-"""Number platform for Holman Water BLE watering duration."""
+"""Number platform for Holman Water BLE settings."""
 
 from __future__ import annotations
 
-import logging
-from typing import Any
-
-from homeassistant.components.number import NumberEntity, NumberMode
+from homeassistant.components.number import NumberMode, RestoreNumber
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import UnitOfTime
+from homeassistant.const import EntityCategory, UnitOfTime
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers.entity import DeviceInfo, EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .const import (
-    DEFAULT_POLL_INTERVAL_HOURS,
-    DEFAULT_WATERING_DURATION_MINUTES,
     DOMAIN,
-    MANUFACTURER,
     MAX_POLL_INTERVAL_HOURS,
     MAX_WATERING_DURATION_MINUTES,
     MIN_POLL_INTERVAL_HOURS,
     MIN_WATERING_DURATION_MINUTES,
 )
 from .coordinator import HolmanWaterCoordinator
-
-_LOGGER = logging.getLogger(__name__)
+from .entity import HolmanEntity
 
 
 async def async_setup_entry(
@@ -40,19 +32,51 @@ async def async_setup_entry(
         async_add_entities: Callback to add entities.
     """
     coordinator: HolmanWaterCoordinator = hass.data[DOMAIN][entry.entry_id]
-    entities = []
-
-    for zone in range(1, coordinator.device_config.total_zones + 1):
-        entities.append(HolmanWateringDuration(coordinator, entry, zone))
-
-    # Add the poll interval entity
+    entities: list[HolmanSetting] = [
+        HolmanWateringDuration(coordinator, entry, zone)
+        for zone in range(1, coordinator.device_config.total_zones + 1)
+    ]
     entities.append(HolmanPollInterval(coordinator, entry))
-
     async_add_entities(entities)
 
 
-class HolmanWateringDuration(NumberEntity):
-    """Representation of a watering duration setting."""
+class HolmanSetting(HolmanEntity, RestoreNumber):
+    """A setting kept by Home Assistant and restored after a restart."""
+
+    _attr_native_step = 1.0
+    _attr_mode = NumberMode.SLIDER
+
+    @property
+    def available(self) -> bool:
+        """Settings live in Home Assistant, so the device is not needed."""
+        return True
+
+    async def async_added_to_hass(self) -> None:
+        """Restore the last value."""
+        await super().async_added_to_hass()
+        last = await self.async_get_last_number_data()
+        if last is None or last.native_value is None:
+            return
+        if self.native_min_value <= last.native_value <= self.native_max_value:
+            self._apply(int(last.native_value))
+
+    async def async_set_native_value(self, value: float) -> None:
+        """Change the setting."""
+        self._apply(int(value))
+        self.async_write_ha_state()
+
+    def _apply(self, value: int) -> None:
+        """Hand a value to the coordinator."""
+        raise NotImplementedError
+
+
+class HolmanWateringDuration(HolmanSetting):
+    """Run time used the next time a valve is turned on."""
+
+    _attr_native_min_value = MIN_WATERING_DURATION_MINUTES
+    _attr_native_max_value = MAX_WATERING_DURATION_MINUTES
+    _attr_native_unit_of_measurement = UnitOfTime.MINUTES
+    _attr_icon = "mdi:timer-cog-outline"
 
     def __init__(
         self,
@@ -67,50 +91,29 @@ class HolmanWateringDuration(NumberEntity):
             entry: Config entry.
             zone: 1-based zone number.
         """
-        self._coordinator = coordinator
-        self._entry = entry
+        super().__init__(
+            coordinator, entry, f"duration_{zone}", f"Valve {zone} Duration"
+        )
         self._zone = zone
-        self._attr_unique_id = f"{entry.entry_id}_duration_{zone}"
-        self._attr_name = f"{coordinator.device_config.name} Valve {zone} Duration"
-        self._attr_native_min_value = MIN_WATERING_DURATION_MINUTES
-        self._attr_native_max_value = MAX_WATERING_DURATION_MINUTES
-        self._attr_native_step = 1.0
-        self._attr_native_unit_of_measurement = UnitOfTime.MINUTES
-        self._attr_mode = NumberMode.SLIDER
-        self._attr_icon = "mdi:timer-cog-outline"
-        self._attr_native_value = float(
-            coordinator.get_watering_duration(zone)
-        )
 
     @property
-    def available(self) -> bool:
-        """Return whether the device is available."""
-        return self._coordinator.available
+    def native_value(self) -> float:
+        """Return the run time in minutes."""
+        return float(self._coordinator.get_watering_duration(self._zone))
 
-    @property
-    def device_info(self) -> DeviceInfo:
-        """Return device information."""
-        return DeviceInfo(
-            identifiers={(DOMAIN, self._coordinator.mac_address)},
-            name=self._coordinator.device_config.name,
-            manufacturer=MANUFACTURER,
-            model=self._coordinator.device_config.model,
-        )
-
-    async def async_set_native_value(self, value: float) -> None:
-        """Set the watering duration.
-
-        Args:
-            value: Duration in minutes.
-        """
-        duration = int(value)
-        self._coordinator.set_watering_duration(self._zone, duration)
-        self._attr_native_value = value
-        self.async_write_ha_state()
+    def _apply(self, value: int) -> None:
+        """Set the run time."""
+        self._coordinator.set_watering_duration(self._zone, value)
 
 
-class HolmanPollInterval(NumberEntity):
-    """Representation of the periodic health check interval."""
+class HolmanPollInterval(HolmanSetting):
+    """How often the status is read while the device is idle."""
+
+    _attr_native_min_value = MIN_POLL_INTERVAL_HOURS
+    _attr_native_max_value = MAX_POLL_INTERVAL_HOURS
+    _attr_native_unit_of_measurement = UnitOfTime.HOURS
+    _attr_icon = "mdi:calendar-sync"
+    _attr_entity_category = EntityCategory.DIAGNOSTIC
 
     def __init__(
         self,
@@ -123,43 +126,13 @@ class HolmanPollInterval(NumberEntity):
             coordinator: Device coordinator.
             entry: Config entry.
         """
-        self._coordinator = coordinator
-        self._entry = entry
-        self._attr_unique_id = f"{entry.entry_id}_poll_interval"
-        self._attr_name = f"{coordinator.device_config.name} Poll Interval"
-        self._attr_native_min_value = MIN_POLL_INTERVAL_HOURS
-        self._attr_native_max_value = MAX_POLL_INTERVAL_HOURS
-        self._attr_native_step = 1.0
-        self._attr_native_unit_of_measurement = UnitOfTime.HOURS
-        self._attr_mode = NumberMode.SLIDER
-        self._attr_icon = "mdi:calendar-sync"
-        self._attr_entity_category = EntityCategory.DIAGNOSTIC
-        self._attr_native_value = float(
-            coordinator.poll_interval_hours
-        )
+        super().__init__(coordinator, entry, "poll_interval", "Poll Interval")
 
     @property
-    def available(self) -> bool:
-        """Return whether the device is available."""
-        return self._coordinator.available
+    def native_value(self) -> float:
+        """Return the poll interval in hours."""
+        return float(self._coordinator.poll_interval_hours)
 
-    @property
-    def device_info(self) -> DeviceInfo:
-        """Return device information."""
-        return DeviceInfo(
-            identifiers={(DOMAIN, self._coordinator.mac_address)},
-            name=self._coordinator.device_config.name,
-            manufacturer=MANUFACTURER,
-            model=self._coordinator.device_config.model,
-        )
-
-    async def async_set_native_value(self, value: float) -> None:
-        """Set the poll interval.
-
-        Args:
-            value: Interval in hours.
-        """
-        hours = int(value)
-        self._coordinator.set_poll_interval_hours(hours)
-        self._attr_native_value = value
-        self.async_write_ha_state()
+    def _apply(self, value: int) -> None:
+        """Set the poll interval."""
+        self._coordinator.set_poll_interval_hours(value)

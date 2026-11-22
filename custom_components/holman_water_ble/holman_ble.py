@@ -10,11 +10,13 @@ from __future__ import annotations
 import asyncio
 import logging
 import random
+from collections.abc import Callable
 from typing import Optional
 
 from bleak import BleakClient
 from bleak.backends.device import BLEDevice
 from bleak_retry_connector import establish_connection
+from homeassistant.util import dt as dt_util
 
 from .const import (
     CHAR_UUID_DEVICE_INFO,
@@ -23,6 +25,7 @@ from .const import (
     CHAR_UUID_TIME,
     CHAR_UUID_WATERING,
     CONNECTION_TIMEOUT,
+    DEVICE_INFO_MIN_SIZE,
     MAX_ZONES,
     PASSCODE_MAX,
     PASSCODE_MIN,
@@ -50,13 +53,21 @@ class HolmanBLE:
     after each operation.
     """
 
-    def __init__(self, device: BLEDevice) -> None:
+    def __init__(
+        self,
+        device: BLEDevice,
+        device_callback: Optional[Callable[[], Optional[BLEDevice]]] = None,
+    ) -> None:
         """Initialize the BLE client.
 
         Args:
             device: The BLE device to communicate with.
+            device_callback: Returns the device via the best current path, so
+                that each connection attempt can use a better one.
         """
         self._device = device
+        self._device_callback = device_callback
+        self.last_error: Optional[Exception] = None
         self._client: Optional[BleakClient] = None
         self._characteristics: dict[str, str] = {}  # UUID → handle
 
@@ -86,6 +97,7 @@ class HolmanBLE:
                 device=self._device,
                 name=str(self._device.address),
                 disconnected_callback=self._on_disconnect,
+                ble_device_callback=self._best_device,
             )
             await self._discover_characteristics()
 
@@ -100,9 +112,18 @@ class HolmanBLE:
             _LOGGER.debug("Connected to %s", self._device.address)
             return True
         except Exception as exc:
-            _LOGGER.error("Failed to connect to %s: %s", self._device.address, exc)
+            # The caller reports this, with the rest of what it knows.
+            _LOGGER.debug("Failed to connect to %s: %s", self._device.address, exc)
+            self.last_error = exc
+            # A failure after connecting must not leave the slot in use.
+            await self.disconnect()
             self._client = None
             return False
+
+    def _best_device(self) -> BLEDevice:
+        """Return the device via the best current path."""
+        current = self._device_callback() if self._device_callback else None
+        return current or self._device
 
     async def disconnect(self) -> None:
         """Disconnect from the device.
@@ -110,11 +131,12 @@ class HolmanBLE:
         Closes the BLE connection without unpairing (pairing
         persists across connections).
         """
-        if not self.is_connected:
+        client = self._client
+        if client is None or not client.is_connected:
             return
 
         try:
-            await self._client.disconnect()
+            await client.disconnect()
         except Exception as exc:
             _LOGGER.debug("Error during disconnect: %s", exc)
         finally:
@@ -171,10 +193,6 @@ class HolmanBLE:
             device_passcode = None
             if pc_data and len(pc_data) >= 2:
                 device_passcode = (pc_data[0] << 8) | pc_data[1]
-                _LOGGER.debug(
-                    "Device passcode: %d, our passcode: %d",
-                    device_passcode, passcode,
-                )
 
             # If device has a different non-zero passcode, clear it first
             if device_passcode is not None and device_passcode != 0 and device_passcode != passcode:
@@ -183,10 +201,7 @@ class HolmanBLE:
                 await asyncio.sleep(0.1)
 
             # Write our passcode
-            _LOGGER.debug("Writing passcode %d", passcode)
-            await self._write_passcode(passcode)
-            _LOGGER.debug("Passcode written to device")
-            return True
+            return await self._write_passcode(passcode)
         except Exception as exc:
             _LOGGER.error("Failed to write passcode: %s", exc)
             return False
@@ -202,7 +217,7 @@ class HolmanBLE:
 
         try:
             data = await self._read_characteristic(CHAR_UUID_DEVICE_INFO)
-            if data is None:
+            if data is None or len(data) < DEVICE_INFO_MIN_SIZE:
                 return None
             info = parse_device_info(data)
 
@@ -252,7 +267,7 @@ class HolmanBLE:
             return False
 
         try:
-            time_packet = build_current_time()
+            time_packet = build_current_time(dt_util.now())
             await self._write_characteristic(CHAR_UUID_TIME, time_packet)
             _LOGGER.debug("Current time sent to device")
             return True

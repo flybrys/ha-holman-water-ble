@@ -30,6 +30,23 @@ MAX_WATERING_DURATION_MINUTES = 240
 # to allow the device to finish its cycle before we check.
 WATERING_COMPLETION_MARGIN_SECONDS = 30
 
+# Read-back after a start or stop command, to confirm the device acted on it.
+VERIFY_ATTEMPTS = 4
+VERIFY_DELAY_SECONDS = 1.5
+
+# A run whose end is unknown (started at the device) is checked this often.
+UNKNOWN_RUN_RECHECK_SECONDS = 15 * 60
+
+# The device clock is only written when it is off by more than this.
+CLOCK_DRIFT_LIMIT_SECONDS = 120
+
+# Delays between attempts to reach an unreachable device; the last one repeats.
+RETRY_DELAYS_SECONDS = (60, 120, 300, 600, 900)
+# An advertisement over a different scanner, or one this much stronger (dB)
+# than the path that failed, triggers a retry no sooner than this.
+PATH_RETRY_RSSI_GAIN = 8
+PATH_RETRY_MIN_SECONDS = 60
+
 # Periodic health check defaults
 DEFAULT_POLL_INTERVAL_HOURS = 4
 MIN_POLL_INTERVAL_HOURS = 1
@@ -100,6 +117,9 @@ DIAL_POSITION_MAP: dict[int, str] = {
     12: "SYSTEST",
 }
 
+# Bluetooth company id in the advertisement's manufacturer data
+MANUFACTURER_ID = 0x0374
+
 # Scan record byte offsets
 SCAN_DEVICE_TYPE_OFFSET = 33
 SCAN_FIRMWARE_VERSION_OFFSET = 34
@@ -116,6 +136,7 @@ BITFIELD_POWER_TYPE_AC = 0x08  # bit 3
 BITFIELD_MCU_POWER = 0x40  # bit 6
 
 # Device info byte offsets
+DEVICE_INFO_MIN_SIZE = 12
 DI_FW_VERSION_HI = 0
 DI_FW_VERSION_LO = 1
 DI_PROTOCOL_VERSION = 2

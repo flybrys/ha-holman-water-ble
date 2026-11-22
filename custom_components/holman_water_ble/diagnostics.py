@@ -45,10 +45,8 @@ async def async_get_config_entry_diagnostics(
     coordinator: HolmanWaterCoordinator = hass.data[DOMAIN][entry.entry_id]
 
     # Device registry info (already has obscured MAC via connections)
-    dev_reg = dr.async_get(hass)
-    device = dev_reg.async_get_device(
-        identifiers={(DOMAIN, coordinator.mac_address)}
-    )
+    devices = dr.async_entries_for_config_entry(dr.async_get(hass), entry.entry_id)
+    device = devices[0] if devices else None
 
     device_info = coordinator.device_info
     device_config = coordinator.device_config

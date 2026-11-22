@@ -31,6 +31,9 @@ from .const import (
     DI_VOLTAGE_AC,
     DI_VOLTAGE_DC,
     DI_VOLTAGE_VALVE,
+    MANUFACTURER_ID,
+    MAX_WATERING_DURATION_MINUTES,
+    MIN_WATERING_DURATION_MINUTES,
     PROFILE_PACKET_SIZE,
     PROFILE_MODE_DISABLED,
     SCAN_BITFIELD_OFFSET,
@@ -62,7 +65,7 @@ def build_passcode(passcode: int) -> bytes:
     return bytes([(passcode >> 8) & 0xFF, passcode & 0xFF])
 
 
-def build_current_time() -> bytes:
+def build_current_time(now: Optional[datetime] = None) -> bytes:
     """Build an 8-byte current time packet.
 
     Format: [year_hi, year_lo, month, day, weekday, hour, min, sec]
@@ -70,10 +73,14 @@ def build_current_time() -> bytes:
     - month: 1-12
     - weekday: 0=Sunday, 6=Saturday
 
+    Args:
+        now: Local time to send. Defaults to the host's local time.
+
     Returns:
         8-byte payload for the TIME characteristic.
     """
-    now = datetime.now()
+    if now is None:
+        now = datetime.now()
     year = now.year
     month = now.month
     day = now.day
@@ -104,12 +111,25 @@ def build_watering_start(zone: int, duration_minutes: int) -> bytes:
 
     Returns:
         10-byte payload for the WATERING characteristic.
+
+    Raises:
+        ValueError: If the duration is out of range.
     """
+    if not (
+        MIN_WATERING_DURATION_MINUTES
+        <= duration_minutes
+        <= MAX_WATERING_DURATION_MINUTES
+    ):
+        raise ValueError(f"Duration out of range: {duration_minutes} min")
+
+    # Hours and minutes are separate fields. A BX1 ignores a start whose
+    # minutes field is 61.
+    hours, minutes = divmod(duration_minutes, 60)
     packet = bytearray(WATERING_PACKET_SIZE)
     packet[0] = WATERING_FLAG_START  # bit 0 = start
     packet[1] = zone - 1  # 0-based zone index
-    packet[2] = 0  # manual hour (0 = use default)
-    packet[3] = duration_minutes & 0xFF  # manual minute
+    packet[2] = hours
+    packet[3] = minutes
     # Bytes 4-9: cycle run/delay time = 0 for manual watering
     return bytes(packet)
 
@@ -276,6 +296,24 @@ def parse_scan_record(manufacturer_data: bytes) -> Optional[ScanInfo]:
     )
 
     return info
+
+
+def parse_advertised_device_type(
+    manufacturer_data: dict[int, bytes],
+) -> Optional[int]:
+    """Read the device type from an advertisement.
+
+    Home Assistant supplies manufacturer data per company id, without the rest
+    of the scan record, so the device type is its first byte.
+
+    Args:
+        manufacturer_data: Manufacturer data keyed by company id.
+
+    Returns:
+        The device type, or None if it is not advertised.
+    """
+    data = manufacturer_data.get(MANUFACTURER_ID)
+    return data[0] if data else None
 
 
 def get_profile_characteristic_uuid(zone: int) -> str:

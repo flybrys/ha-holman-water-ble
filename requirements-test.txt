@@ -14,3 +14,11 @@ pytest-mock>=3.12.0
 # Transitive HA dependencies (needed for importing HA components)
 pyserial>=3.5
 aiousbwatcher>=1.1.0
+serialx
+# The bluetooth integration's own requirements
+habluetooth
+bluetooth-adapters
+bluetooth-auto-recovery
+bluetooth-data-tools
+dbus-fast
+aiohasupervisor

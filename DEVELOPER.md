@@ -89,7 +89,7 @@ See `parser.py` for complete implementation. Key formats:
 
 **Watering Start** (10 bytes):
 ```
-[0x01] [zone-1] [0] [duration_min] [0x00 x6]
+[0x01] [zone-1] [hours] [minutes 0-59] [0x00 x6]
 ```
 
 **Watering Stop** (10 bytes):

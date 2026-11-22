@@ -1,10 +1,10 @@
-
-
 # Holman Water BLE (Unofficial) — Home Assistant Integration
 
 Unofficial Home Assistant integration for Holman Bluetooth irrigation devices (BX1, BX2, BX4, BTX1A, BTX1B, BTX6, BTX8, and more).
 
 > **⚠️ Disclaimer**: This is a personal hobby project. I am not affiliated with, endorsed by, or in any way connected to Holman Industries. The BLE protocol was reverse-engineered from the official iGardener mobile app and may break with firmware updates. **Use at your own risk — absolutely no warranty of any kind is provided.**
+
+> A fork of [daweizhangau/ha-holman-water-ble](https://github.com/daweizhangau/ha-holman-water-ble) by Dawei Zhang, with reliability fixes. Bluetooth proxies must support active connections: Shelly devices only forward advertisements and cannot be used to control a tap.
 
 ---
 
@@ -13,8 +13,9 @@ Unofficial Home Assistant integration for Holman Bluetooth irrigation devices (B
 - **Valve Control**: Turn individual valves/zones on and off via switch entities
 - **Configurable Duration**: Set watering duration per zone (1–240 minutes, default 10)
 - **Auto Stop**: Watering stops automatically after the configured duration. The switch returns to OFF once the device confirms the watering is complete
-- **Manual Override**: Turn a valve off at any time — the watering timer is immediately cancelled
-- **Schedule Clearing**: All schedules are automatically cleared on each connection to prevent unwanted automatic watering
+- **Manual Override**: Turn a valve off at any time
+- **Confirmed commands**: After a start or stop the device's own status is read back. If it did not act, the action fails with an error
+- **Schedule Clearing**: Schedules stored on the device are cleared when it is paired
 - **Diagnostics**: Read device information on demand (voltages, firmware, dial position, watering status, etc.)
 - **Health Check**: The integration periodically connects to the device to verify it is still reachable and refresh sensor values
 - **Unpairing**: Clear the device passcode so it can be re-paired with the official app
@@ -114,13 +115,14 @@ Passcodes are stored in `{config_dir}/holman_water_ble_passcodes.json`, keyed by
 
 1. **On-demand connection**: When you toggle a switch or press a button, the integration connects to the device via BLE.
 2. **Authentication**: The stored passcode is written to the device.
-3. **Schedule clearing**: All zone schedules are disabled (mode=0) to prevent automatic watering.
-4. **Time sync**: The current time is written to the device.
-5. **Operation**: The requested action (start/stop watering, read diagnostics, unpair) is performed.
+3. **Operation**: The requested action (start/stop watering, read diagnostics, unpair) is performed. Start and stop are confirmed by reading the status.
+4. **Pairing only**: All zone schedules are disabled (mode=0) to prevent automatic watering, and the clock is set.
+5. **Time sync**: The clock is corrected when the device is idle and more than two minutes out. A status read changes nothing else on the device.
 6. **Disconnect**: The BLE connection is closed.
-7. **Watering timer**: When a valve is turned on, a timer runs for the configured duration plus a 30-second margin. When it expires, the integration re-connects to verify watering has stopped and updates the switch state.
-8. **Manual override**: Turning a valve off immediately cancels the timer and sends a stop command.
-9. **Periodic health check**: Every N hours (configurable via the Poll Interval entity, default 4), the integration connects to the device to refresh sensor values and verify availability. If the check fails, entities are marked unavailable.
+7. **Runs**: A run started from Home Assistant is left alone until it should be over, plus a 30-second margin. Then the status is read and the switch follows it. A run started at the device also shows, and is checked every 15 minutes.
+8. **Manual override**: Turning a valve off sends a stop command. If the device cannot be reached, the valve is not shown as off.
+9. **Periodic health check**: Every N hours (configurable via the Poll Interval entity, default 4) while idle, the status is read.
+   **Unreachable devices**: entities become unavailable at the first failed connection. The device is retried after 1, 2, 5, 10 and then every 15 minutes, and at once when a different or clearly stronger Bluetooth path appears.
 10. **Pairing lifecycle**: After unpairing, all entities become unavailable and only the Pair button is visible. Pressing Pair re-generates a passcode, re-pairs the device, and restores all entities.
 
 This means the device is only connected briefly when needed, preserving battery life.

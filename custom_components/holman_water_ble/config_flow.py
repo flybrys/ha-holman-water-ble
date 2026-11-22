@@ -9,6 +9,7 @@ import voluptuous as vol
 from homeassistant import config_entries
 from homeassistant.components.bluetooth import (
     BluetoothServiceInfoBleak,
+    async_ble_device_from_address,
     async_discovered_service_info,
 )
 from homeassistant.const import CONF_MAC
@@ -18,9 +19,9 @@ from .const import (
     DEFAULT_DEVICE_NAME,
     DEVICE_TYPE_MAP,
     DOMAIN,
-    MANUFACTURER,
     SERVICE_UUID,
 )
+from .parser import parse_advertised_device_type
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -59,10 +60,9 @@ class HolmanWaterConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         # If we have manufacturer data, try to show more context
         # at the confirm step
         if self._discovery_info and self._discovery_info.manufacturer_data:
-            for mfr_data in self._discovery_info.manufacturer_data.values():
-                if len(mfr_data) > 33:
-                    self._device_type = mfr_data[33]
-                    break
+            self._device_type = parse_advertised_device_type(
+                self._discovery_info.manufacturer_data
+            )
 
         self.context["title_placeholders"] = {
             "name": self._device_name,
@@ -119,7 +119,7 @@ class HolmanWaterConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             Flow result.
         """
         if user_input is not None:
-            mac = user_input[CONF_MAC]
+            mac = user_input[CONF_MAC].strip().upper()
             await self.async_set_unique_id(mac)
             self._abort_if_unique_id_configured()
             self._mac_address = mac
@@ -234,13 +234,11 @@ class HolmanWaterConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         Returns:
             The device type id, or None if the device could not be reached.
         """
-        from bleak import BleakScanner
-
         from .holman_ble import HolmanBLE
 
         try:
-            ble_device = await BleakScanner.find_device_by_address(
-                self._mac_address, timeout=10.0
+            ble_device = async_ble_device_from_address(
+                self.hass, self._mac_address, connectable=True
             )
             if ble_device is None:
                 _LOGGER.error(

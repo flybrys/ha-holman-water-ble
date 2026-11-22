@@ -12,12 +12,12 @@ from homeassistant.components.sensor import (
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import UnitOfElectricPotential
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers.entity import DeviceInfo, EntityCategory
+from homeassistant.helpers.entity import EntityCategory
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
-from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .const import DIAL_POSITION_MAP, DOMAIN, MANUFACTURER
+from .const import DIAL_POSITION_MAP, DOMAIN
 from .coordinator import HolmanWaterCoordinator
+from .entity import HolmanEntity
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -98,7 +98,7 @@ async def async_setup_entry(
                 info.dial_position, f"Unknown ({info.dial_position})"
             )
             if info
-            else "—",
+            else None,
         ),
         HolmanDiagnosticSensor(
             coordinator,
@@ -106,7 +106,7 @@ async def async_setup_entry(
             "watering_status",
             "Watering Status",
             None,
-            lambda info: "On" if info and info.is_watering else "Off",
+            lambda info: ("On" if info.is_watering else "Off") if info else None,
         ),
         HolmanDiagnosticSensor(
             coordinator,
@@ -114,9 +114,13 @@ async def async_setup_entry(
             "rain_sensor",
             "Rain Sensor",
             None,
-            lambda info: "Wet"
-            if info and info.rain_sensor_wet
-            else ("On" if info and info.rain_sensor_on else "Off"),
+            lambda info: None
+            if info is None
+            else (
+                "Wet"
+                if info.rain_sensor_wet
+                else ("On" if info.rain_sensor_on else "Off")
+            ),
         ),
         HolmanDiagnosticSensor(
             coordinator,
@@ -168,7 +172,7 @@ async def async_setup_entry(
     async_add_entities(entities)
 
 
-class HolmanDiagnosticSensor(SensorEntity):
+class HolmanDiagnosticSensor(HolmanEntity, SensorEntity):
     """Representation of a diagnostic sensor."""
 
     def __init__(
@@ -192,42 +196,16 @@ class HolmanDiagnosticSensor(SensorEntity):
             value_fn: Function to extract value from DeviceInfo.
             numeric: Whether the sensor value is numeric (enables state class).
         """
-        self._coordinator = coordinator
-        self._entry = entry
-        self._key = key
+        super().__init__(coordinator, entry, key, name)
         self._value_fn = value_fn
-        self._attr_unique_id = f"{entry.entry_id}_{key}"
-        self._attr_name = f"{coordinator.device_config.name} {name}"
         self._attr_native_unit_of_measurement = unit
-        self._attr_should_poll = False
         self._attr_entity_category = EntityCategory.DIAGNOSTIC
         self._attr_icon = SENSOR_ICONS.get(key)
         if numeric:
             self._attr_state_class = SensorStateClass.MEASUREMENT
-
-        self._coordinator.register_state_update_callback(self._async_update)
-
-    @property
-    def available(self) -> bool:
-        """Return whether the device is available."""
-        return self._coordinator.available
-
-    @property
-    def device_info(self) -> DeviceInfo:
-        """Return device information."""
-        return DeviceInfo(
-            identifiers={(DOMAIN, self._coordinator.mac_address)},
-            name=self._coordinator.device_config.name,
-            manufacturer=MANUFACTURER,
-            model=self._coordinator.device_config.model,
-        )
 
     @property
     def native_value(self) -> Any:
         """Return the sensor value."""
         info = self._coordinator.device_info
         return self._value_fn(info)
-
-    def _async_update(self) -> None:
-        """Callback from coordinator when state might have changed."""
-        self.async_write_ha_state()
