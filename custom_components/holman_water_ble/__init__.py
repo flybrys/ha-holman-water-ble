@@ -6,7 +6,13 @@ import logging
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_MAC
-from homeassistant.core import HomeAssistant, ServiceCall, callback
+from homeassistant.core import (
+    HomeAssistant,
+    ServiceCall,
+    ServiceResponse,
+    SupportsResponse,
+    callback,
+)
 from homeassistant.exceptions import ServiceValidationError
 from homeassistant.helpers import device_registry as dr
 
@@ -16,6 +22,7 @@ from .const import (
     DOMAIN,
     MANUFACTURER,
     PLATFORMS,
+    SERVICE_READ_RAW,
     SERVICE_UNPAIR,
 )
 from .coordinator import HolmanWaterCoordinator
@@ -172,7 +179,8 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     coordinator: HolmanWaterCoordinator = hass.data[DOMAIN].pop(entry.entry_id)
     coordinator.async_shutdown()
     if not hass.data[DOMAIN]:
-        hass.services.async_remove(DOMAIN, SERVICE_UNPAIR)
+        for service in (SERVICE_UNPAIR, SERVICE_READ_RAW):
+            hass.services.async_remove(DOMAIN, service)
     return True
 
 
@@ -182,13 +190,26 @@ def _register_services(hass: HomeAssistant) -> None:
     if hass.services.has_service(DOMAIN, SERVICE_UNPAIR):
         return
 
-    async def handle_unpair(call: ServiceCall) -> None:
-        """Handle the unpair service call."""
+    def find(call: ServiceCall) -> HolmanWaterCoordinator:
+        """Return the coordinator of the device a call names."""
         mac_address = str(call.data.get("mac_address", "")).upper()
         for coordinator in hass.data.get(DOMAIN, {}).values():
             if coordinator.mac_address.upper() == mac_address:
-                await coordinator.async_unpair()
-                return
+                return coordinator
         raise ServiceValidationError(f"No Holman device {mac_address or '(none)'}")
 
+    async def handle_unpair(call: ServiceCall) -> None:
+        """Handle the unpair service call."""
+        await find(call).async_unpair()
+
+    async def handle_read_raw(call: ServiceCall) -> ServiceResponse:
+        """Handle the read_raw service call."""
+        return {"characteristics": await find(call).async_read_raw()}
+
     hass.services.async_register(DOMAIN, SERVICE_UNPAIR, handle_unpair)
+    hass.services.async_register(
+        DOMAIN,
+        SERVICE_READ_RAW,
+        handle_read_raw,
+        supports_response=SupportsResponse.ONLY,
+    )

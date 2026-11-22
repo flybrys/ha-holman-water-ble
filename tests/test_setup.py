@@ -279,3 +279,21 @@ async def test_diagnostics_and_unpair_service(hass):
         DOMAIN, "unpair", {"mac_address": MAC.lower()}, blocking=True
     )
     assert hass.states.get(VALVE).state == "unavailable"
+
+
+@pytest.mark.asyncio
+async def test_read_raw_service(hass, tap):
+    """The action returns the data, and goes away with the last entry."""
+    entry = await _set_up(hass)
+    tap.writes.clear()
+    response = await hass.services.async_call(
+        DOMAIN,
+        "read_raw",
+        {"mac_address": MAC.lower()},
+        blocking=True,
+        return_response=True,
+    )
+    assert len(response["characteristics"]) == 7
+    assert tap.writes == ["passcode"]
+    assert await hass.config_entries.async_unload(entry.entry_id)
+    assert not hass.services.has_service(DOMAIN, "read_raw")

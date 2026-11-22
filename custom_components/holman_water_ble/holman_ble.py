@@ -257,6 +257,47 @@ class HolmanBLE:
             _LOGGER.error("Failed to read MAC address: %s", exc)
             return None
 
+    async def read_raw(self) -> list[dict[str, object]]:
+        """Read everything the device lets us read, without writing anything.
+
+        The passcode and MAC address are left out, and any value containing
+        the MAC address is withheld.
+
+        Returns:
+            One entry per characteristic: service, uuid, properties, and its
+            value as hex or the reason there is none.
+        """
+        client = self._client
+        if client is None:
+            return []
+
+        private = {CHAR_UUID_PASSCODE.lower(), CHAR_UUID_MAC.lower()}
+        mac = bytes.fromhex(self._device.address.replace(":", ""))
+        result: list[dict[str, object]] = []
+        for service in client.services:
+            for char in service.characteristics:
+                entry: dict[str, object] = {
+                    "service": service.uuid,
+                    "uuid": char.uuid,
+                    "properties": sorted(char.properties),
+                }
+                result.append(entry)
+                if char.uuid.lower() in private:
+                    entry["note"] = "left out (private)"
+                elif "read" not in char.properties:
+                    entry["note"] = "not readable"
+                else:
+                    try:
+                        value = bytes(await client.read_gatt_char(char))
+                    except Exception as exc:  # noqa: BLE001 - report and go on
+                        entry["note"] = f"read failed: {exc}"
+                        continue
+                    if mac in value or mac[::-1] in value:
+                        entry["note"] = "left out (contains the MAC address)"
+                    else:
+                        entry["value"] = value.hex(" ")
+        return result
+
     async def set_current_time(self) -> bool:
         """Set the device's current time to the host's current time.
 

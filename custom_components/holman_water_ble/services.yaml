@@ -9,3 +9,13 @@ unpair:
       required: true
       selector:
         text:
+read_raw:
+  name: Read raw data
+  description: Read everything an idle device lets us read, for troubleshooting. Writes nothing except the login passcode every connection needs. The passcode and MAC address are left out of the result.
+  fields:
+    mac_address:
+      name: MAC Address
+      description: MAC address of the device to read.
+      required: true
+      selector:
+        text:

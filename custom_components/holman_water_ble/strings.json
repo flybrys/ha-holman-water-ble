@@ -111,6 +111,16 @@
           "description": "MAC address of the device to unpair."
         }
       }
+    },
+    "read_raw": {
+      "name": "Read raw data",
+      "description": "Read everything an idle device lets us read, for troubleshooting.",
+      "fields": {
+        "mac_address": {
+          "name": "MAC Address",
+          "description": "MAC address of the device to read."
+        }
+      }
     }
   }
 }

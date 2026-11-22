@@ -189,6 +189,7 @@ PLATFORMS = ["switch", "number", "button", "sensor"]
 
 # Services
 SERVICE_UNPAIR = "unpair"
+SERVICE_READ_RAW = "read_raw"
 SERVICE_READ_DIAGNOSTICS = "read_diagnostics"
 SERVICE_START_WATERING = "start_watering"
 SERVICE_STOP_WATERING = "stop_watering"

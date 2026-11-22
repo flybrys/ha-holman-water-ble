@@ -298,6 +298,27 @@ class HolmanWaterCoordinator:
 
         return await self._run(_read)
 
+    async def async_read_raw(self) -> list[dict[str, object]]:
+        """Read all readable data from the device, for troubleshooting.
+
+        Raises:
+            HolmanError: If it is watering, or could not be read.
+        """
+        if self._watering:
+            raise HolmanCommandError(
+                f"{self._mac_address} is watering; read it when it is idle"
+            )
+
+        async def _read(client: HolmanBLE) -> list[dict[str, object]]:
+            data = await client.read_raw()
+            if not data:
+                raise HolmanConnectionError(
+                    f"{self._mac_address} connected but returned no data"
+                )
+            return data
+
+        return await self._run(_read)
+
     async def async_start_watering(self, zone: int) -> None:
         """Start a zone and confirm with the device that it is watering.
 

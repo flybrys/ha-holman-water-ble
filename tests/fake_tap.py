@@ -12,7 +12,9 @@ from types import SimpleNamespace
 from homeassistant.util import dt as dt_util
 
 from custom_components.holman_water_ble.const import (
+    CHAR_UUID_COMMAND,
     CHAR_UUID_DEVICE_INFO,
+    CHAR_UUID_MAC,
     CHAR_UUID_PASSCODE,
     CHAR_UUID_TIME,
     CHAR_UUID_WATERING,
@@ -21,6 +23,13 @@ from custom_components.holman_water_ble.const import (
 from custom_components.holman_water_ble.parser import build_current_time
 
 MAC = "AA:BB:CC:DD:EE:FF"
+SERIAL = "00002A25-0000-1000-8000-00805F9B34FB"
+BROKEN = "0000F0FF-0000-1000-8000-00805F9B34FB"
+
+
+def _characteristic(uuid: str, *properties: str) -> SimpleNamespace:
+    """Describe a characteristic the way bleak does, in lower case."""
+    return SimpleNamespace(uuid=uuid.lower(), properties=list(properties))
 
 
 class FakeTap:
@@ -40,7 +49,21 @@ class FakeTap:
         self.writes: list[str] = []
         self.connections = 0
         self.disconnections = 0
-        self.services: list[SimpleNamespace] = []
+        self.services = [
+            SimpleNamespace(
+                uuid="c521f000-0d70-4d4f-8e43-40d84c50ab38",
+                characteristics=[
+                    _characteristic(CHAR_UUID_MAC, "read"),
+                    _characteristic(CHAR_UUID_DEVICE_INFO, "read", "notify"),
+                    _characteristic(CHAR_UUID_WATERING, "read", "write"),
+                    _characteristic(CHAR_UUID_COMMAND, "write"),
+                    _characteristic(CHAR_UUID_PASSCODE, "read", "write"),
+                    _characteristic(SERIAL, "read"),
+                    _characteristic(BROKEN, "read"),
+                ],
+            )
+        ]
+        self.reads: list[str] = []
         self.is_connected = False
 
     async def connect(self, **kwargs: object) -> FakeTap:
@@ -59,10 +82,18 @@ class FakeTap:
     async def pair(self) -> None:
         """Bond."""
 
-    async def read_gatt_char(self, uuid: str) -> bytes:
-        """Answer a read."""
+    async def read_gatt_char(self, char: str | SimpleNamespace) -> bytes:
+        """Answer a read, by uuid or by characteristic."""
+        uuid = char if isinstance(char, str) else char.uuid.upper()
+        self.reads.append(uuid)
         if not self.responds:
             raise TimeoutError("no answer")
+        if uuid == CHAR_UUID_WATERING:
+            return bytes([0, 0, 0, 12, 0, 0, 0, 0, 0, 0])
+        if uuid == SERIAL:
+            return b"SN" + bytes.fromhex(MAC.replace(":", ""))[::-1]
+        if uuid == BROKEN:
+            raise OSError("not permitted")
         if uuid == CHAR_UUID_PASSCODE:
             return bytes([self.passcode >> 8, self.passcode & 0xFF])
         if uuid == CHAR_UUID_TIME:

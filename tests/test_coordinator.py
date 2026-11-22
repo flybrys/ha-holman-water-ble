@@ -15,7 +15,13 @@ from homeassistant.exceptions import HomeAssistantError
 from homeassistant.util import dt as dt_util
 
 from custom_components.holman_water_ble import coordinator as coordinator_module
-from custom_components.holman_water_ble.const import PASSCODE_FILENAME
+from custom_components.holman_water_ble.const import (
+    CHAR_UUID_COMMAND,
+    CHAR_UUID_MAC,
+    CHAR_UUID_PASSCODE,
+    CHAR_UUID_WATERING,
+    PASSCODE_FILENAME,
+)
 from custom_components.holman_water_ble.coordinator import HolmanWaterCoordinator
 from custom_components.holman_water_ble.errors import (
     HolmanCommandError,
@@ -27,7 +33,7 @@ from custom_components.holman_water_ble.passcodes import (
     async_get_passcodes,
 )
 
-from .fake_tap import MAC, FakeTap
+from .fake_tap import BROKEN, MAC, SERIAL, FakeTap
 
 BX1 = DeviceConfig(model="BX1", name="BX1 Bluetooth Tap Timer", total_zones=1)
 BX2 = DeviceConfig(model="BX2", name="BX2 Bluetooth Tap Timer", total_zones=2)
@@ -486,6 +492,41 @@ class TestPairing:
         manager = PasscodeManager(hass)
         await manager.async_load()
         assert manager.get(MAC) == 777
+
+
+@pytest.mark.asyncio
+class TestReadRaw:
+    """Reading what the tap stores."""
+
+    async def test_reads_without_writing(self, coordinator, tap):
+        """Only the login is written, and every entry is reported."""
+        data = await coordinator.async_read_raw()
+        assert tap.writes == ["passcode"]
+        by_uuid = {entry["uuid"].upper(): entry for entry in data}
+        assert len(by_uuid) == 7
+        assert by_uuid[CHAR_UUID_WATERING]["value"] == "00 00 00 0c 00 00 00 00 00 00"
+        assert by_uuid[CHAR_UUID_COMMAND]["note"] == "not readable"
+        assert by_uuid[BROKEN]["note"] == "read failed: not permitted"
+        assert coordinator.available
+
+    async def test_private_data_is_left_out(self, coordinator, tap):
+        """Neither the passcode nor the MAC address is returned."""
+        data = await coordinator.async_read_raw()
+        by_uuid = {entry["uuid"].upper(): entry for entry in data}
+        for uuid in (CHAR_UUID_PASSCODE, CHAR_UUID_MAC, SERIAL):
+            assert "value" not in by_uuid[uuid]
+        assert CHAR_UUID_MAC not in tap.reads
+        # The login reads the passcode once; the dump must not.
+        assert tap.reads.count(CHAR_UUID_PASSCODE) == 1
+
+    async def test_refused_while_watering(self, coordinator, tap):
+        """A run in progress is left alone."""
+        await coordinator.async_start_watering(1)
+        connections = tap.connections
+        with pytest.raises(HolmanCommandError, match="is watering"):
+            await coordinator.async_read_raw()
+        assert tap.connections == connections
+        assert tap.watering
 
 
 @pytest.mark.asyncio
