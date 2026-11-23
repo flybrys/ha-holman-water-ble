@@ -1,6 +1,9 @@
 """Constants for the Holman Water BLE integration."""
 
 DOMAIN = "holman_water_ble"
+
+# Config entry data: whether the device reports a dial. Unset until known.
+CONF_HAS_DIAL = "has_dial"
 MANUFACTURER = "Holman Industries"
 DEFAULT_DEVICE_NAME = "Holman Water Device"
 

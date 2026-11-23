@@ -87,17 +87,14 @@ The integration will automatically pair with the device by generating and storin
 - **`{device_name} Pair`** — Re-pair an unpaired device. Only visible when the device is unpaired. Generates a new passcode and restores all entities
 
 ### Sensor (diagnostic)
+Only sensors the device can use are created:
 - Battery Voltage
-- Voltage DC / AC / Valve
-- Dial Position (Valve 1–8, LOCK, OFF, RUN, SYSTEST)
-- Watering Status (On/Off)
-- Rain Sensor (Off/Wet)
-- Active Station
-- Connected Valves
-- Firmware Version
-- Protocol Version
-- Diagnostic Byte
-- RSSI
+- Voltage AC, on mains-powered models
+- Dial Position (Valve 1–8, LOCK, OFF, RUN, SYSTEST), on devices that report a dial
+- Active Station and Connected Valves, on models with several valves
+- Voltage Valve, Rain Sensor (Off/On/Wet) and Diagnostic Byte, off by default; enable them on the device page
+
+Firmware and protocol versions are shown on the device page. The valve switch shows whether it is watering.
 
 ## Services
 

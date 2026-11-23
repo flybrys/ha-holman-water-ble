@@ -42,7 +42,6 @@ DURATION = "number.bx1_bluetooth_tap_timer_run_time"
 BUTTON = "number.bx1_bluetooth_tap_timer_button_run_time"
 POLL = "number.bx1_bluetooth_tap_timer_poll_interval"
 BATTERY = "sensor.bx1_bluetooth_tap_timer_battery_voltage"
-WATERING = "sensor.bx1_bluetooth_tap_timer_watering_status"
 READ = "button.bx1_bluetooth_tap_timer_read_diagnostics"
 
 
@@ -150,7 +149,6 @@ async def test_setup_reads_status(hass, tap):
     assert entry.state is ConfigEntryState.LOADED
     assert hass.states.get(VALVE).state == "off"
     assert hass.states.get(BATTERY).state == "6.1"
-    assert hass.states.get(WATERING).state == "Off"
     assert tap.writes == ["passcode"]
 
 
@@ -174,16 +172,8 @@ async def test_unique_ids_are_unchanged(hass):
         "_clear_pairing",
         "_pair",
         "_battery_voltage",
-        "_voltage_dc",
-        "_voltage_ac",
         "_voltage_valve",
-        "_dial_position",
-        "_watering_status",
         "_rain_sensor",
-        "_active_station",
-        "_connected_valves",
-        "_firmware_version",
-        "_protocol_version",
         "_diagnostic_byte",
     }
 
@@ -227,7 +217,6 @@ async def test_run_from_services(hass, tap):
     await _call(hass, "switch", "turn_on", VALVE)
     assert tap.minutes == 61
     assert hass.states.get(VALVE).state == "on"
-    assert hass.states.get(WATERING).state == "On"
     await _call(hass, "switch", "turn_off", VALVE)
     assert not tap.watering
     assert hass.states.get(VALVE).state == "off"
@@ -324,8 +313,9 @@ async def test_names_follow_the_device_name(hass):
 
 
 @pytest.mark.asyncio
-async def test_several_zones_are_numbered(hass):
+async def test_several_zones_are_numbered(hass, tap):
     """A device with two valves numbers them."""
+    tap.device_type = 6
     await _set_up(hass, device_type=6)
     for entity_id in (
         "switch.bx2_bluetooth_tap_timer_valve_1",
@@ -333,4 +323,79 @@ async def test_several_zones_are_numbered(hass):
         "number.bx2_bluetooth_tap_timer_valve_2_run_time",
         "number.bx2_bluetooth_tap_timer_valve_2_button_run_time",
     ):
-        assert hass.states.get(entity_id) is not None, entity_id
+        state = hass.states.get(entity_id)
+        assert state is not None and state.state != "unavailable", entity_id
+
+
+def _states(hass) -> set[str]:
+    return {state.entity_id for state in hass.states.async_all("sensor")}
+
+
+@pytest.mark.asyncio
+async def test_bx1_sensors(hass):
+    """A BX1 shows its battery only; three more exist but are off by default."""
+    entry = await _set_up(hass)
+    assert _states(hass) == {BATTERY}
+    registry = entity_registry.async_get(hass)
+    disabled = {
+        e.unique_id.removeprefix(entry.entry_id)
+        for e in entity_registry.async_entries_for_config_entry(
+            registry, entry.entry_id
+        )
+        if e.disabled_by is entity_registry.RegistryEntryDisabler.INTEGRATION
+    }
+    assert disabled == {"_voltage_valve", "_rain_sensor", "_diagnostic_byte"}
+    assert entry.data["has_dial"] is False
+    device = device_registry.async_entries_for_config_entry(
+        device_registry.async_get(hass), entry.entry_id
+    )[0]
+    assert device.sw_version == "3 (protocol 2)"
+    assert device.model_id == "100"
+
+
+@pytest.mark.asyncio
+async def test_unused_sensors_are_removed(hass):
+    """Entities left by earlier versions are removed, wanted ones kept."""
+    registry = entity_registry.async_get(hass)
+    entry = await _set_up(hass)
+    assert await hass.config_entries.async_unload(entry.entry_id)
+    for key in ("voltage_dc", "watering_status", "firmware_version", "dial_position", "voltage_ac", "battery_voltage"):
+        registry.async_get_or_create(
+            "sensor",
+            DOMAIN,
+            f"{entry.entry_id}_{key}",
+            config_entry=entry,
+            suggested_object_id=f"old_{key}",
+        )
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await _settle(hass)
+    left = {
+        e.unique_id.removeprefix(entry.entry_id)
+        for e in entity_registry.async_entries_for_config_entry(
+            registry, entry.entry_id
+        )
+        if e.domain == "sensor"
+    }
+    assert left == {"_battery_voltage", "_voltage_valve", "_rain_sensor", "_diagnostic_byte"}
+    assert registry.async_get(BATTERY) is not None
+    assert not any(e.startswith("sensor.old_") for e in registry.entities)
+
+
+@pytest.mark.asyncio
+async def test_dial_appears_when_reported(hass, tap):
+    """A device that reports a dial gets a Dial Position sensor."""
+    tap.has_dial = True
+    entry = await _set_up(hass)
+    await _settle(hass)
+    assert entry.data["has_dial"] is True
+    assert "sensor.bx1_bluetooth_tap_timer_dial_position" in _states(hass)
+
+
+@pytest.mark.asyncio
+async def test_multi_valve_and_mains_sensors(hass, tap):
+    """Station and valve counts on multi-valve models, AC on mains models."""
+    tap.device_type = 8
+    await _set_up(hass, device_type=8)
+    states = _states(hass)
+    for key in ("active_station", "connected_valves", "voltage_ac"):
+        assert f"sensor.ac_controller_8_zones_{key}" in states, key

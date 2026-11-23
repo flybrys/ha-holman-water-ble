@@ -17,6 +17,7 @@ from homeassistant.exceptions import ServiceValidationError
 from homeassistant.helpers import device_registry as dr
 
 from .const import (
+    CONF_HAS_DIAL,
     DEFAULT_DEVICE_NAME,
     DEVICE_TYPE_MAP,
     DOMAIN,
@@ -82,10 +83,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
 
     @callback
-    def _check_device_type() -> None:
-        _self_heal_device_type(hass, entry, coordinator)
+    def _check_device() -> None:
+        _update_device_version(hass, entry, coordinator)
+        _self_heal(hass, entry, coordinator)
 
-    coordinator.register_state_update_callback(_check_device_type)
+    coordinator.register_state_update_callback(_check_device)
     _register_services(hass)
     coordinator.async_start()
     return True
@@ -117,23 +119,44 @@ def _register_device(
     )
     if device_type not in DEVICE_TYPE_MAP:
         return
-    sw_version = f"Type {device_type} ({device_config.model})"
-    if device.model != device_config.model or device.sw_version != sw_version:
+    model_id = str(device_type)
+    if device.model != device_config.model or device.model_id != model_id:
         registry.async_update_device(
             device.id,
             name=device_config.name,
             model=device_config.model,
-            sw_version=sw_version,
+            model_id=model_id,
         )
 
 
 @callback
-def _self_heal_device_type(
+def _update_device_version(
     hass: HomeAssistant,
     entry: ConfigEntry,
     coordinator: HolmanWaterCoordinator,
 ) -> None:
-    """Store the device type the device reports, and reload if it differs.
+    """Show the firmware the device reports on its device page."""
+    info = coordinator.device_info
+    if info is None or info.firmware_version == 0:
+        return
+    sw_version = f"{info.firmware_version} (protocol {info.protocol_version})"
+    registry = dr.async_get(hass)
+    device = registry.async_get_device_by_identifier(
+        (DOMAIN, coordinator.mac_address), entry.entry_id
+    )
+    if device is not None and device.sw_version != sw_version:
+        registry.async_update_device(device.id, sw_version=sw_version)
+
+
+@callback
+def _self_heal(
+    hass: HomeAssistant,
+    entry: ConfigEntry,
+    coordinator: HolmanWaterCoordinator,
+) -> None:
+    """Store what the device reports about itself; reload if entities change.
+
+    Covers its device type and whether it has a dial.
 
     Args:
         hass: Home Assistant instance.
@@ -141,8 +164,19 @@ def _self_heal_device_type(
         coordinator: The coordinator for this device.
     """
     info = coordinator.device_info
+    if info is None:
+        return
+    has_dial = entry.data.get(CONF_HAS_DIAL)
+    if has_dial is not info.is_dial_presented:
+        hass.config_entries.async_update_entry(
+            entry, data={**entry.data, CONF_HAS_DIAL: info.is_dial_presented}
+        )
+        # Unknown and absent both create no dial sensor.
+        if bool(has_dial) != info.is_dial_presented:
+            hass.config_entries.async_schedule_reload(entry.entry_id)
+            return
     stored_type = entry.data.get("device_type", 0)
-    if info is None or info.device_type in (0, stored_type):
+    if info.device_type in (0, stored_type):
         return
     if info.device_type not in DEVICE_TYPE_MAP:
         _LOGGER.debug(

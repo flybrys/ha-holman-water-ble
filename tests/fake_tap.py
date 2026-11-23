@@ -53,6 +53,8 @@ class FakeTap:
             for zone in (1, 2)
         }
         self.accepts_profile = True
+        self.has_dial = False
+        self.device_type = 100
         self.passcode = 0
         self.clock: datetime = dt_util.now()
         self.writes: list[str] = []
@@ -119,9 +121,9 @@ class FakeTap:
         data = bytearray(17)
         data[1] = 3
         data[2] = 2
-        data[3] = 100
+        data[3] = self.device_type
         data[5] = 61
-        data[8] = 1 if self.watering else 0
+        data[8] = (1 if self.watering else 0) | (0x20 if self.has_dial else 0)
         return bytes(data)
 
     async def write_gatt_char(
