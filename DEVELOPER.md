@@ -97,7 +97,7 @@ See `parser.py` for complete implementation. Key formats:
 [0x00] [zone-1] [0x00 x8]
 ```
 
-**Disabled Profile** (20 bytes): All zeros (mode=0)
+**Disabled Profile** (20 bytes): Zeros (mode=0), except the button's run time: `[15]` hours, `[16]` minutes. All zeros leaves the button with nothing to run
 
 **Current Time** (8 bytes):
 ```

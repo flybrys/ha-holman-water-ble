@@ -26,7 +26,6 @@ from .const import (
     CHAR_UUID_WATERING,
     CONNECTION_TIMEOUT,
     DEVICE_INFO_MIN_SIZE,
-    MAX_ZONES,
     PASSCODE_MAX,
     PASSCODE_MIN,
 )
@@ -37,9 +36,11 @@ from .parser import (
     build_passcode,
     build_watering_start,
     build_watering_stop,
+    get_button_minutes,
     get_profile_characteristic_uuid,
     parse_device_info,
     parse_time_response,
+    set_button_minutes,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -309,21 +310,20 @@ class HolmanBLE:
 
         try:
             time_packet = build_current_time(dt_util.now())
-            await self._write_characteristic(CHAR_UUID_TIME, time_packet)
+            await self._write_characteristic(
+                CHAR_UUID_TIME, time_packet, response=True
+            )
             _LOGGER.debug("Current time sent to device")
             return True
         except Exception as exc:
             _LOGGER.error("Failed to set current time: %s", exc)
             return False
 
-    async def clear_schedules(self, num_zones: int) -> bool:
-        """Clear all schedules by writing disabled profiles.
-
-        Writes a disabled profile (mode=0) to each zone's profile
-        characteristic.
+    async def clear_schedules(self, button_minutes: dict[int, int]) -> bool:
+        """Clear all schedules, keeping a run time for the device's button.
 
         Args:
-            num_zones: Number of zones to clear (1-8).
+            button_minutes: The button's run time for each zone to clear.
 
         Returns:
             True if all writes were successful.
@@ -331,13 +331,13 @@ class HolmanBLE:
         if not self.is_connected:
             return False
 
-        disabled_profile = build_disabled_profile()
-        zones_to_clear = min(num_zones, MAX_ZONES)
-
         try:
-            for zone in range(1, zones_to_clear + 1):
-                uuid = get_profile_characteristic_uuid(zone)
-                await self._write_characteristic(uuid, disabled_profile)
+            for zone, minutes in button_minutes.items():
+                await self._write_characteristic(
+                    get_profile_characteristic_uuid(zone),
+                    build_disabled_profile(minutes),
+                    response=True,
+                )
                 _LOGGER.debug("Cleared schedule for zone %d", zone)
             return True
         except Exception as exc:
@@ -371,6 +371,37 @@ class HolmanBLE:
         except Exception as exc:
             _LOGGER.error("Failed to start watering: %s", exc)
             return False
+
+    async def read_profile(self, zone: int) -> Optional[bytes]:
+        """Read a zone's profile, None if it could not be read."""
+        data = await self._read_characteristic(get_profile_characteristic_uuid(zone))
+        return None if data is None else bytes(data)
+
+    async def set_button_time(self, zone: int, duration_minutes: int) -> bool:
+        """Set the run time the device's button uses.
+
+        Only those two bytes of the profile change, and only if they differ.
+        The device must be idle: writing a profile may end a run.
+
+        Returns:
+            True if the device holds that run time.
+        """
+        profile = await self.read_profile(zone)
+        if profile is None or get_button_minutes(profile) is None:
+            return False
+        if get_button_minutes(profile) == duration_minutes:
+            return True
+        try:
+            await self._write_characteristic(
+                get_profile_characteristic_uuid(zone),
+                set_button_minutes(profile, duration_minutes),
+                response=True,
+            )
+        except Exception as exc:  # noqa: BLE001 - the caller tries again later
+            _LOGGER.debug("Failed to set the button time: %s", exc)
+            return False
+        profile = await self.read_profile(zone)
+        return profile is not None and get_button_minutes(profile) == duration_minutes
 
     async def stop_watering(self, zone: int) -> bool:
         """Stop manual watering for a specific zone.

@@ -37,8 +37,9 @@ from custom_components.holman_water_ble.diagnostics import (
 
 from .fake_tap import MAC, FakeTap
 
-VALVE = "switch.bx1_bluetooth_tap_timer_valve_1"
-DURATION = "number.bx1_bluetooth_tap_timer_valve_1_duration"
+VALVE = "switch.bx1_bluetooth_tap_timer_valve"
+DURATION = "number.bx1_bluetooth_tap_timer_run_time"
+BUTTON = "number.bx1_bluetooth_tap_timer_button_run_time"
 POLL = "number.bx1_bluetooth_tap_timer_poll_interval"
 BATTERY = "sensor.bx1_bluetooth_tap_timer_battery_voltage"
 WATERING = "sensor.bx1_bluetooth_tap_timer_watering_status"
@@ -167,6 +168,7 @@ async def test_unique_ids_are_unchanged(hass):
     assert ids == {
         "_valve_1",
         "_duration_1",
+        "_button_duration_1",
         "_poll_interval",
         "_read_diagnostics",
         "_clear_pairing",
@@ -204,12 +206,15 @@ async def test_settings_are_restored(hass, tap):
     """Run time and poll interval survive a reload, and the run time is used."""
     entry = await _set_up(hass)
     await _call(hass, "number", "set_value", DURATION, value=75)
+    await _call(hass, "number", "set_value", BUTTON, value=7)
     await _call(hass, "number", "set_value", POLL, value=6)
     assert await hass.config_entries.async_unload(entry.entry_id)
     assert await hass.config_entries.async_setup(entry.entry_id)
     await _settle(hass)
     assert hass.states.get(DURATION).state == "75.0"
+    assert hass.states.get(BUTTON).state == "7.0"
     assert hass.states.get(POLL).state == "6.0"
+    assert tap.button_minutes == 7
     await _call(hass, "switch", "turn_on", VALVE)
     assert tap.minutes == 75
 
@@ -297,3 +302,35 @@ async def test_read_raw_service(hass, tap):
     assert tap.writes == ["passcode"]
     assert await hass.config_entries.async_unload(entry.entry_id)
     assert not hass.services.has_service(DOMAIN, "read_raw")
+
+
+@pytest.mark.asyncio
+async def test_names_follow_the_device_name(hass):
+    """Renaming the device renames its entities, without repeating the model."""
+    entry = await _set_up(hass)
+    registry = device_registry.async_get(hass)
+    device = device_registry.async_entries_for_config_entry(
+        registry, entry.entry_id
+    )[0]
+    registry.async_update_device(device.id, name_by_user="Back Yard Tap")
+    await _settle(hass)
+    names = {hass.states.get(e).name for e in (VALVE, DURATION, BUTTON, BATTERY)}
+    assert names == {
+        "Back Yard Tap Valve",
+        "Back Yard Tap Run Time",
+        "Back Yard Tap Button Run Time",
+        "Back Yard Tap Battery Voltage",
+    }
+
+
+@pytest.mark.asyncio
+async def test_several_zones_are_numbered(hass):
+    """A device with two valves numbers them."""
+    await _set_up(hass, device_type=6)
+    for entity_id in (
+        "switch.bx2_bluetooth_tap_timer_valve_1",
+        "switch.bx2_bluetooth_tap_timer_valve_2",
+        "number.bx2_bluetooth_tap_timer_valve_2_run_time",
+        "number.bx2_bluetooth_tap_timer_valve_2_button_run_time",
+    ):
+        assert hass.states.get(entity_id) is not None, entity_id

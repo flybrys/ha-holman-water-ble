@@ -20,6 +20,7 @@ from homeassistant.helpers.event import async_call_later
 from homeassistant.util import dt as dt_util
 
 from .const import (
+    BUTTON_TIME_DELAY_SECONDS,
     CLOCK_DRIFT_LIMIT_SECONDS,
     DEFAULT_POLL_INTERVAL_HOURS,
     DEFAULT_WATERING_DURATION_MINUTES,
@@ -75,6 +76,7 @@ class HolmanWaterCoordinator:
             zone: DEFAULT_WATERING_DURATION_MINUTES
             for zone in range(1, device_config.total_zones + 1)
         }
+        self._button_durations = dict(self._watering_durations)
         # Zones the device is watering -> expected end. None when the run was
         # not started from Home Assistant, so its end is not known.
         self._watering: dict[int, Optional[datetime]] = {}
@@ -140,6 +142,19 @@ class HolmanWaterCoordinator:
     def set_watering_duration(self, zone: int, duration: int) -> None:
         """Set the run time for a zone in minutes. Used from the next start."""
         self._watering_durations[zone] = duration
+
+    def get_button_duration(self, zone: int) -> int:
+        """Get the run time of a zone's button in minutes."""
+        return self._button_durations.get(zone, DEFAULT_WATERING_DURATION_MINUTES)
+
+    def set_button_duration(self, zone: int, duration: int) -> None:
+        """Set the run time of a zone's button in minutes.
+
+        Sent to an idle device once the value settles.
+        """
+        self._button_durations[zone] = duration
+        if self._reachable and not self._watering and self._cancel_refresh:
+            self._schedule_refresh(BUTTON_TIME_DELAY_SECONDS)
 
     def register_state_update_callback(self, update: Callable[[], None]) -> None:
         """Register a callback for state changes."""
@@ -281,8 +296,11 @@ class HolmanWaterCoordinator:
     # ----------------------------------------------------------- operations
 
     async def async_refresh(self) -> DeviceInfo:
-        """Read the device status. Does not change anything on the device,
-        other than correcting its clock when it is idle and clearly wrong.
+        """Read the device status.
+
+        While it is idle, its clock is corrected if clearly wrong, and its
+        button is given our run time if it has another. Nothing else changes,
+        and nothing at all during a run.
         """
 
         async def _read(client: HolmanBLE) -> DeviceInfo:
@@ -292,8 +310,10 @@ class HolmanWaterCoordinator:
                     f"{self._mac_address} connected but did not return its status"
                 )
             self._apply_status(info)
-            if not info.is_watering and self._clock_is_wrong(info):
-                await client.set_current_time()
+            if not info.is_watering:
+                if self._clock_is_wrong(info):
+                    await client.set_current_time()
+                await self._sync_button_times(client)
             return info
 
         return await self._run(_read)
@@ -317,7 +337,8 @@ class HolmanWaterCoordinator:
                 )
             return data
 
-        return await self._run(_read)
+        # Also readable before pairing, when there is no passcode to send.
+        return await self._run(_read, authenticate=self.paired)
 
     async def async_start_watering(self, zone: int) -> None:
         """Start a zone and confirm with the device that it is watering.
@@ -400,7 +421,7 @@ class HolmanWaterCoordinator:
                     f"{self._mac_address} did not accept the new passcode"
                 )
             await self._passcodes.async_set(self._mac_address, passcode)
-            await client.clear_schedules(self._device_config.total_zones)
+            await client.clear_schedules(self._button_durations)
             await client.set_current_time()
             info = await client.read_device_info()
             if info is not None:
@@ -422,6 +443,14 @@ class HolmanWaterCoordinator:
         await self._run(_unpair)
 
     # -------------------------------------------------------------- helpers
+
+    async def _sync_button_times(self, client: HolmanBLE) -> None:
+        """Give the device's button its run time. Retried at every status read."""
+        for zone, duration in self._button_durations.items():
+            if not await client.set_button_time(zone, duration):
+                _LOGGER.debug(
+                    "Button time of zone %d on %s not set", zone, self._mac_address
+                )
 
     async def _run(
         self,

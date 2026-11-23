@@ -10,10 +10,18 @@ from .const import DOMAIN, MANUFACTURER
 from .coordinator import HolmanWaterCoordinator
 
 
+def zone_name(coordinator: HolmanWaterCoordinator, zone: int, name: str) -> str:
+    """Name a zone's entity, with the zone number only if there are several."""
+    if coordinator.device_config.total_zones == 1:
+        return name or "Valve"
+    return f"Valve {zone} {name}".strip()
+
+
 class HolmanEntity(Entity):
     """An entity whose state is pushed by the coordinator."""
 
     _attr_should_poll = False
+    _attr_has_entity_name = True
 
     def __init__(
         self,
@@ -33,7 +41,7 @@ class HolmanEntity(Entity):
         self._coordinator = coordinator
         self._entry = entry
         self._attr_unique_id = f"{entry.entry_id}_{key}"
-        self._attr_name = f"{coordinator.device_config.name} {name}"
+        self._attr_name = name
         self._attr_device_info = DeviceInfo(
             identifiers={(DOMAIN, coordinator.mac_address)},
             name=coordinator.device_config.name,

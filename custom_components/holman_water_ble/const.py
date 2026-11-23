@@ -166,6 +166,11 @@ WATERING_FLAG_CYCLE = 0x02
 
 # Profile packet constants
 PROFILE_PACKET_SIZE = 20
+# The run time the device's own button uses, kept in the profile.
+PROFILE_BUTTON_HOURS = 15
+PROFILE_BUTTON_MINUTES = 16
+# Wait for a run time slider to settle before sending it.
+BUTTON_TIME_DELAY_SECONDS = 20
 PROFILE_MODE_DISABLED = 0
 PROFILE_MODE_7_DAY = 1
 PROFILE_MODE_ODD_DAYS = 2

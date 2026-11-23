@@ -34,6 +34,8 @@ from .const import (
     MANUFACTURER_ID,
     MAX_WATERING_DURATION_MINUTES,
     MIN_WATERING_DURATION_MINUTES,
+    PROFILE_BUTTON_HOURS,
+    PROFILE_BUTTON_MINUTES,
     PROFILE_PACKET_SIZE,
     PROFILE_MODE_DISABLED,
     SCAN_BITFIELD_OFFSET,
@@ -115,12 +117,7 @@ def build_watering_start(zone: int, duration_minutes: int) -> bytes:
     Raises:
         ValueError: If the duration is out of range.
     """
-    if not (
-        MIN_WATERING_DURATION_MINUTES
-        <= duration_minutes
-        <= MAX_WATERING_DURATION_MINUTES
-    ):
-        raise ValueError(f"Duration out of range: {duration_minutes} min")
+    _check_duration(duration_minutes)
 
     # Hours and minutes are separate fields. A BX1 ignores a start whose
     # minutes field is 61.
@@ -150,17 +147,50 @@ def build_watering_stop(zone: int) -> bytes:
     return bytes(packet)
 
 
-def build_disabled_profile() -> bytes:
+def _check_duration(duration_minutes: int) -> None:
+    """Raise ValueError if a run time is out of range."""
+    if not (
+        MIN_WATERING_DURATION_MINUTES
+        <= duration_minutes
+        <= MAX_WATERING_DURATION_MINUTES
+    ):
+        raise ValueError(f"Duration out of range: {duration_minutes} min")
+
+
+def build_disabled_profile(button_minutes: int = 0) -> bytes:
     """Build a 20-byte disabled schedule profile.
 
-    Mode=0 disables the schedule for the zone.
+    Mode=0 disables the schedule for the zone. The profile also holds the run
+    time the device's button uses, so an all-zero profile disables the button.
+
+    Args:
+        button_minutes: Run time for the button, 0 for none.
 
     Returns:
         20-byte payload for a PROFILE characteristic.
     """
     packet = bytearray(PROFILE_PACKET_SIZE)
     packet[0] = PROFILE_MODE_DISABLED
+    if button_minutes:
+        return set_button_minutes(packet, button_minutes)
     return bytes(packet)
+
+
+def get_button_minutes(profile: bytes) -> Optional[int]:
+    """Read the button's run time from a profile, None if it is too short."""
+    if len(profile) < PROFILE_PACKET_SIZE:
+        return None
+    return profile[PROFILE_BUTTON_HOURS] * 60 + profile[PROFILE_BUTTON_MINUTES]
+
+
+def set_button_minutes(profile: bytes, duration_minutes: int) -> bytes:
+    """Return a profile with the button's run time changed, and nothing else."""
+    _check_duration(duration_minutes)
+    changed = bytearray(profile)
+    changed[PROFILE_BUTTON_HOURS], changed[PROFILE_BUTTON_MINUTES] = divmod(
+        duration_minutes, 60
+    )
+    return bytes(changed)
 
 
 def build_keep_connection() -> bytes:

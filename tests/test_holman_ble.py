@@ -233,7 +233,7 @@ class TestHolmanBLE:
 
         ble = HolmanBLE(mock_device)
         await ble.connect()
-        result = await ble.clear_schedules(num_zones=2)
+        result = await ble.clear_schedules({1: 10, 2: 10})
 
         assert result is True
         # Should write to E001 and E002
@@ -258,7 +258,7 @@ class TestHolmanBLE:
         ble = HolmanBLE(mock_device)
         import asyncio
         asyncio.run(ble.connect())
-        result = asyncio.run(ble.clear_schedules(num_zones=2))
+        result = asyncio.run(ble.clear_schedules({1: 10, 2: 10}))
 
         assert result is True
         # Should write to E001 and E002

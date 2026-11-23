@@ -16,7 +16,7 @@ from .const import (
     MIN_WATERING_DURATION_MINUTES,
 )
 from .coordinator import HolmanWaterCoordinator
-from .entity import HolmanEntity
+from .entity import HolmanEntity, zone_name
 
 
 async def async_setup_entry(
@@ -36,6 +36,10 @@ async def async_setup_entry(
         HolmanWateringDuration(coordinator, entry, zone)
         for zone in range(1, coordinator.device_config.total_zones + 1)
     ]
+    entities.extend(
+        HolmanButtonRunTime(coordinator, entry, zone)
+        for zone in range(1, coordinator.device_config.total_zones + 1)
+    )
     entities.append(HolmanPollInterval(coordinator, entry))
     async_add_entities(entities)
 
@@ -70,12 +74,17 @@ class HolmanSetting(HolmanEntity, RestoreNumber):
         raise NotImplementedError
 
 
-class HolmanWateringDuration(HolmanSetting):
-    """Run time used the next time a valve is turned on."""
+class HolmanZoneMinutes(HolmanSetting):
+    """A zone's time in minutes."""
 
     _attr_native_min_value = MIN_WATERING_DURATION_MINUTES
     _attr_native_max_value = MAX_WATERING_DURATION_MINUTES
     _attr_native_unit_of_measurement = UnitOfTime.MINUTES
+
+
+class HolmanWateringDuration(HolmanZoneMinutes):
+    """Run time used the next time a valve is turned on."""
+
     _attr_icon = "mdi:timer-cog-outline"
 
     def __init__(
@@ -92,7 +101,10 @@ class HolmanWateringDuration(HolmanSetting):
             zone: 1-based zone number.
         """
         super().__init__(
-            coordinator, entry, f"duration_{zone}", f"Valve {zone} Duration"
+            coordinator,
+            entry,
+            f"duration_{zone}",
+            zone_name(coordinator, zone, "Run Time"),
         )
         self._zone = zone
 
@@ -104,6 +116,42 @@ class HolmanWateringDuration(HolmanSetting):
     def _apply(self, value: int) -> None:
         """Set the run time."""
         self._coordinator.set_watering_duration(self._zone, value)
+
+
+class HolmanButtonRunTime(HolmanZoneMinutes):
+    """Run time used by the button on the device."""
+
+    _attr_icon = "mdi:gesture-tap-button"
+
+    def __init__(
+        self,
+        coordinator: HolmanWaterCoordinator,
+        entry: ConfigEntry,
+        zone: int,
+    ) -> None:
+        """Initialize the button run time number.
+
+        Args:
+            coordinator: Device coordinator.
+            entry: Config entry.
+            zone: 1-based zone number.
+        """
+        super().__init__(
+            coordinator,
+            entry,
+            f"button_duration_{zone}",
+            zone_name(coordinator, zone, "Button Run Time"),
+        )
+        self._zone = zone
+
+    @property
+    def native_value(self) -> float:
+        """Return the button run time in minutes."""
+        return float(self._coordinator.get_button_duration(self._zone))
+
+    def _apply(self, value: int) -> None:
+        """Set the button run time."""
+        self._coordinator.set_button_duration(self._zone, value)
 
 
 class HolmanPollInterval(HolmanSetting):

@@ -19,6 +19,7 @@ from custom_components.holman_water_ble.const import (
     CHAR_UUID_TIME,
     CHAR_UUID_WATERING,
     PROFILE_UUID_PREFIX,
+    PROFILE_UUID_SUFFIX,
 )
 from custom_components.holman_water_ble.parser import build_current_time
 
@@ -44,6 +45,14 @@ class FakeTap:
         self.accepts_passcode = True
         self.watering = False
         self.minutes: int | None = None
+        # In step with the default run time of 10 minutes.
+        self.profiles = {
+            f"{PROFILE_UUID_PREFIX}{zone}{PROFILE_UUID_SUFFIX}": bytearray(
+                [0] * 16 + [10, 0, 0, 0]
+            )
+            for zone in (1, 2)
+        }
+        self.accepts_profile = True
         self.passcode = 0
         self.clock: datetime = dt_util.now()
         self.writes: list[str] = []
@@ -65,6 +74,12 @@ class FakeTap:
         ]
         self.reads: list[str] = []
         self.is_connected = False
+
+    @property
+    def button_minutes(self) -> int:
+        """The run time the button of zone 1 would use."""
+        profile = self.profiles[f"{PROFILE_UUID_PREFIX}1{PROFILE_UUID_SUFFIX}"]
+        return profile[15] * 60 + profile[16]
 
     async def connect(self, **kwargs: object) -> FakeTap:
         """Stand in for establish_connection."""
@@ -90,6 +105,8 @@ class FakeTap:
             raise TimeoutError("no answer")
         if uuid == CHAR_UUID_WATERING:
             return bytes([0, 0, 0, 12, 0, 0, 0, 0, 0, 0])
+        if uuid in self.profiles:
+            return bytes(self.profiles[uuid])
         if uuid == SERIAL:
             return b"SN" + bytes.fromhex(MAC.replace(":", ""))[::-1]
         if uuid == BROKEN:
@@ -120,6 +137,10 @@ class FakeTap:
             self.writes.append("time")
         elif uuid.startswith(PROFILE_UUID_PREFIX):
             self.writes.append("schedule")
+            # Suspected of the real tap: a profile write ends a run.
+            self.watering = False
+            if self.accepts_profile:
+                self.profiles[uuid] = bytearray(data)
         elif uuid == CHAR_UUID_WATERING:
             start = bool(data[0] & 1)
             self.writes.append("start" if start else "stop")

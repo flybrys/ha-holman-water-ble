@@ -11,7 +11,7 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .const import DOMAIN
 from .coordinator import HolmanWaterCoordinator
-from .entity import HolmanEntity
+from .entity import HolmanEntity, zone_name
 
 
 async def async_setup_entry(
@@ -51,7 +51,9 @@ class HolmanValveSwitch(HolmanEntity, SwitchEntity):
             entry: Config entry.
             zone: 1-based zone number.
         """
-        super().__init__(coordinator, entry, f"valve_{zone}", f"Valve {zone}")
+        super().__init__(
+            coordinator, entry, f"valve_{zone}", zone_name(coordinator, zone, "")
+        )
         self._zone = zone
 
     @property

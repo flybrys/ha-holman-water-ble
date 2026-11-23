@@ -74,10 +74,11 @@ The integration will automatically pair with the device by generating and storin
 ## Entities
 
 ### Switch (per zone)
-- **`{device_name} Valve {N}`** — Turn watering on/off for each zone
+- **`{device_name} Valve`** (`Valve {N}` with several zones) — Turn watering on/off for each zone
 
 ### Number
-- **`{device_name} Valve {N} Duration`** — Set watering duration in minutes (1–240, default 10)
+- **`{device_name} Run Time`** — Run time when started from Home Assistant, in minutes (1–240, default 10)
+- **`{device_name} Button Run Time`** — Run time when started with the button on the device, in minutes (1–240, default 10)
 - **`{device_name} Poll Interval`** — Set how often the integration checks the device is reachable (1–24 hours, default 4). Sensors are refreshed and device availability is updated on each check
 
 ### Button
@@ -117,7 +118,8 @@ Passcodes are stored in `{config_dir}/holman_water_ble_passcodes.json`, keyed by
 2. **Authentication**: The stored passcode is written to the device.
 3. **Operation**: The requested action (start/stop watering, read diagnostics, unpair) is performed. Start and stop are confirmed by reading the status.
 4. **Pairing only**: All zone schedules are disabled (mode=0) to prevent automatic watering, and the clock is set.
-5. **Time sync**: The clock is corrected when the device is idle and more than two minutes out. A status read changes nothing else on the device.
+5. **Time sync**: The clock is corrected when the device is idle and more than two minutes out. A status read changes nothing else on the device, apart from the button's run time below.
+   **Button**: The device's own button waters for a run time stored with its schedule. It is set with the Button Run Time entity, and sent while the device is idle. Runs started with the button show in Home Assistant at the next status read.
 6. **Disconnect**: The BLE connection is closed.
 7. **Runs**: A run started from Home Assistant is left alone until it should be over, plus a 30-second margin. Then the status is read and the switch follows it. A run started at the device also shows, and is checked every 15 minutes.
 8. **Manual override**: Turning a valve off sends a stop command. If the device cannot be reached, the valve is not shown as off.

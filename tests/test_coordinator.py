@@ -530,6 +530,97 @@ class TestReadRaw:
 
 
 @pytest.mark.asyncio
+class TestButtonTime:
+    """The run time used by the device's own button."""
+
+    @pytest.mark.parametrize("minutes", [5, 59, 60, 61, 240])
+    async def test_button_gets_the_run_time(self, coordinator, tap, minutes):
+        """An idle tap is given the run time at the next status read."""
+        coordinator.set_button_duration(1, minutes)
+        await coordinator.async_refresh()
+        assert tap.button_minutes == minutes
+
+    async def test_independent_of_the_run_time(self, coordinator, tap):
+        """The run time and the button's run time do not affect each other."""
+        coordinator.set_watering_duration(1, 61)
+        coordinator.set_button_duration(1, 7)
+        await coordinator.async_refresh()
+        assert tap.button_minutes == 7
+        await coordinator.async_start_watering(1)
+        assert tap.minutes == 61
+        assert tap.button_minutes == 7
+
+    async def test_wiped_time_is_put_back(self, coordinator, tap):
+        """A profile zeroed by an earlier version is repaired."""
+        for profile in tap.profiles.values():
+            profile[:] = bytes(20)
+        await coordinator.async_refresh()
+        assert tap.button_minutes == 10
+
+    async def test_only_the_time_changes(self, coordinator, tap):
+        """A schedule stored by the app is kept."""
+        app = bytes([1, 0x7F, 8] + [0] * 13 + [7, 0, 0, 0])
+        uuid = next(iter(tap.profiles))
+        tap.profiles[uuid] = bytearray(app)
+        await coordinator.async_refresh()
+        kept = bytes(tap.profiles[uuid])
+        assert kept[16] == 10
+        assert kept[:16] == app[:16]
+        assert kept[17:] == app[17:]
+
+    async def test_never_written_during_a_run(self, coordinator, tap):
+        """Neither a new run time nor a read disturbs a run."""
+        await coordinator.async_start_watering(1)
+        coordinator.set_button_duration(1, 30)
+        await coordinator.async_refresh()
+        assert tap.watering
+        assert "schedule" not in tap.writes
+        tap.watering = False
+        await coordinator.async_refresh()
+        assert tap.button_minutes == 30
+
+    async def test_sent_once_the_slider_settles(self, coordinator, tap, timers):
+        """Changes are gathered, and nothing is sent when it already matches."""
+        await coordinator.async_refresh()
+        for minutes in (11, 12, 13):
+            coordinator.set_button_duration(1, minutes)
+        assert timers.delay == 20
+        await timers.fire()
+        assert tap.writes.count("schedule") == 1
+        assert tap.button_minutes == 13
+        await coordinator.async_refresh()
+        assert tap.writes.count("schedule") == 1
+
+    async def test_failure_does_not_fail_the_read(self, coordinator, tap):
+        """A tap that will not take it still shows its status."""
+        tap.accepts_profile = False
+        coordinator.set_button_duration(1, 30)
+        await coordinator.async_refresh()
+        assert coordinator.available
+        assert tap.button_minutes == 10
+
+    async def test_pairing_keeps_the_button_working(self, hass, bt, tap):
+        """Clearing schedules leaves the button a run time."""
+        coordinator = HolmanWaterCoordinator(
+            hass, _entry(), MAC, BX1, await async_get_passcodes(hass)
+        )
+        coordinator.set_button_duration(1, 54)
+        await coordinator.async_pair()
+        profile = next(iter(tap.profiles.values()))
+        assert profile[0] == 0
+        assert tap.button_minutes == 54
+
+    async def test_read_raw_works_unpaired(self, hass, bt, tap):
+        """Reading needs no pairing, and sends no passcode."""
+        coordinator = HolmanWaterCoordinator(
+            hass, _entry(), MAC, BX1, await async_get_passcodes(hass)
+        )
+        assert await coordinator.async_read_raw()
+        assert tap.writes == []
+        assert not coordinator.paired
+
+
+@pytest.mark.asyncio
 async def test_update_callbacks(coordinator):
     """Entities are told about changes until they unregister."""
     calls = []
