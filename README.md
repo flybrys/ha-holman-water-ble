@@ -16,7 +16,7 @@ Unofficial Home Assistant integration for Holman Bluetooth irrigation devices (B
 - **Manual Override**: Turn a valve off at any time
 - **Confirmed commands**: After a start or stop the device's own status is read back. If it did not act, the action fails with an error
 - **Schedule Clearing**: Schedules stored on the device are cleared when it is paired
-- **Diagnostics**: Read device information on demand (voltages, firmware, dial position, watering status, etc.)
+- **Diagnostics**: Read device information on demand (voltages, rain sensor, dial position on models with one; firmware is on the device page)
 - **Health Check**: The integration periodically connects to the device to verify it is still reachable and refresh sensor values
 - **Unpairing**: Clear the device passcode so it can be re-paired with the official app
 - **Multi-Device**: Support for devices with 1–8 valves/zones
@@ -44,7 +44,7 @@ Unofficial Home Assistant integration for Holman Bluetooth irrigation devices (B
 
 ## Requirements
 
-- Home Assistant 2026.2 or later
+- Home Assistant 2026.10 or later
 - A Bluetooth adapter accessible to HA (built-in, USB dongle, or [ESPHome Bluetooth proxy](https://esphome.io/components/bluetooth_proxy/))
 - A supported Holman Bluetooth device
 
